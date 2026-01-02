@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>ShabuAllDay Area Radius + Nearest + PSR (Kakao) + CSV</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:16px;color:#111}
+    h2{margin:0 0 12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0}
+    label{font-weight:700}
+    input[type="text"],input[type="number"],select{padding:8px 10px;border:1px solid #ddd;border-radius:8px}
+    input[type="file"]{padding:6px}
+    button{padding:10px 14px;border:1px solid #111;background:#111;color:#fff;border-radius:8px;cursor:pointer}
+    button.secondary{background:#fff;color:#111}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    #map{width:100%;height:60vh;border:1px solid #ddd;border-radius:10px}
+    .log{font-family:Consolas,Menlo,monospace;white-space:pre-wrap;background:#f8f8f8;padding:10px;border:1px solid #ddd;border-radius:8px;max-height:22vh;overflow:auto}
+    .pill{padding:2px 8px;border-radius:999px;background:#eef2ff;color:#111;font-size:12px}
+    .legend{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    .dot{width:12px;height:12px;border-radius:999px;display:inline-block;border:2px solid #0003}
+    .dot.area{background:#111}
+    .dot.shabu{background:#277475}
+    .dot.kookoo{background:#F59E0B}
+    .dot.ashley{background:#8B5CF6}
+    .dot.myeong{background:#EF4444}
+    .dot.circle{background:transparent;border-color:#111}
+    .tiny{font-size:12px}
+    .spacer{flex:1}
+    .muted{color:#666}
+    .card{border:1px solid #e5e7eb;border-radius:10px;padding:10px;background:#fff}
+    .grid{display:grid;grid-template-columns:160px 1fr;gap:8px;align-items:center}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #e5e7eb;padding:6px 8px;font-size:12px;vertical-align:top}
+    th{background:#f8fafc;text-align:left;position:sticky;top:0;z-index:2}
+    tr:hover{background:#f8fafc}
+  </style>
+</head>
+
+<body>
+  <h2>Areas 기준 — 최근접(샤브/애슐리/쿠우쿠우/명륜) + 반경 키워드 + 최근접 샤브 PSR(1~11월)</h2>
+
+  <div class="row">
+    <label for="kakaoKey">Kakao JavaScript Key</label>
+    <input id="kakaoKey" type="text" placeholder="paste JS key" size="30">
+    <button id="loadSdk">Load SDK</button>
+    <span class="spacer"></span>
+    <div id="legend" class="legend tiny">
+      <span class="dot area"></span> Areas(점)
+      <span class="dot circle"></span> Areas(반경 원)
+      <span class="dot.shabu dot"></span> 샤브올데이
+      <span class="dot.kookoo dot"></span> 쿠우쿠우
+      <span class="dot.ashley dot"></span> 애슐리
+      <span class="dot.myeong dot"></span> 명륜진사갈비
+    </div>
+  </div>
+
+  <div class="row">
+    <label for="xlsx">Upload Constant.xlsx</label>
+    <input id="xlsx" type="file" accept=".xlsx,.xls" />
+
+    <label for="radius">Radius (m)</label>
+    <input id="radius" type="number" value="500" min="50" step="50">
+
+    <button id="drawAll" disabled>Draw Areas</button>
+    <button id="clear" class="secondary">Clear</button>
+  </div>
+
+  <div class="row">
+    <label for="areaSel">Area 선택</label>
+    <select id="areaSel" disabled style="min-width:360px">
+      <option value="">— 업로드 후 선택 —</option>
+    </select>
+
+    <button id="analyzeSelected" disabled>Analyze Selected Area</button>
+    <button id="analyzeAll" disabled>Analyze All Areas</button>
+    <button id="csvTable" class="secondary" disabled>CSV (Table)</button>
+
+    <span class="spacer"></span>
+    <span class="pill" id="statSheets">Sheets: -</span>
+    <span class="pill" id="statRadius">Radius: 500m</span>
+    <span class="pill" id="statAreas">Areas: -</span>
+    <span class="pill" id="statRows">Rows: 0</span>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="row">
+    <div class="card" style="width:100%">
+      <div class="grid">
+        <div><strong>선택 Area</strong></div>
+        <div id="selInfo" class="muted">-</div>
+
+        <div><strong>키워드 검색(반경 내)</strong></div>
+        <div id="kwInfo" class="muted">-</div>
+
+        <div><strong>최근접 샤브올데이</strong></div>
+        <div id="nearShabuInfo" class="muted">-</div>
+      </div>
+
+      <div style="margin-top:10px">
+        <div class="tiny muted" style="margin-bottom:6px">Results Table (Selected / All)</div>
+        <div style="overflow:auto;max-height:340px">
+          <table>
+            <thead>
+              <tr id="resultsHead"></tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr><td class="muted">-</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="tiny muted" style="margin-top:6px">
+          * 테이블 행 클릭 → 해당 Area로 지도 이동
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h4>Log</h4>
+  <div class="log" id="log"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <script>
+  'use strict';
+
+  // =========================
+  // CONFIG / COLORS
+  // =========================
+  const COLOR_AREA    = '#111111';
+  const COLOR_SHABU   = '#277475';
+  const COLOR_KOOKOO  = '#F59E0B';
+  const COLOR_ASHLEY  = '#8B5CF6';
+  const COLOR_MYEONG  = '#EF4444';
+
+  // ✅ 너가 나중에 바꿀 예정이라 했으니 구조만 유지: "샤브샤브 & 무한리필" OR
+  const KEYWORDS_INRADIUS = ['샤브샤브', '무한리필'];
+
+  // PSR 월 헤더(샤브올데이PSR 시트)
+  const PSR_MONTH_HEADERS = [
+    { key:'M01', hdr:'1월PSR', label:'PSR_1월' },
+    { key:'M02', hdr:'2월PSR', label:'PSR_2월' },
+    { key:'M03', hdr:'3월PSR', label:'PSR_3월' },
+    { key:'M04', hdr:'4월PSR', label:'PSR_4월' },
+    { key:'M05', hdr:'5월PSR', label:'PSR_5월' },
+    { key:'M06', hdr:'6월PSR', label:'PSR_6월' },
+    { key:'M07', hdr:'7월PSR', label:'PSR_7월' },
+    { key:'M08', hdr:'8월PSR', label:'PSR_8월' },
+    { key:'M09', hdr:'9월PSR', label:'PSR_9월' },
+    { key:'M10', hdr:'10월PSR', label:'PSR_10월' },
+    { key:'M11', hdr:'11월PSR', label:'PSR_11월' },
+  ];
+
+  // =========================
+  // STATE
+  // =========================
+  let map, places;
+  let sdkReady = false;
+  let wbLoaded = false;
+
+  // datasets
+  let datasets = {
+    areas: [],
+    shabu: [],
+    kookoo: [],
+    ashley: [],
+    myeong: []
+  };
+
+  // shabu psr map: normalizedName -> months {M01..M11: number|''}
+  let shabuPsrMap = new Map();
+
+  // overlays
+  let areaMarkers = [];
+  let compMarkers = [];
+  let radiusCircle = null;
+
+  // caches
+  const keywordCache = new Map();
+
+  // table
+  let tableRows = [];
+
+  // =========================
+  // UI helpers
+  // =========================
+  function $(id){ return document.getElementById(id); }
+  function log(msg){
+    $('log').textContent += msg + '\n';
+    $('log').scrollTop = $('log').scrollHeight;
+  }
+
+  function escapeHtml(s){
+    return String(s ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#039;');
+  }
+
+  function toNum(v){
+    if(typeof v === 'number') return v;
+    let s = String(v ?? '').trim();
+    s = s.replace(/,/g,'.');
+    s = s.replace(/[^\d.\-]/g,'');
+    const n = parseFloat(s);
+    return isFinite(n) ? n : NaN;
+  }
+
+  function normalizeName(s){
+    return String(s ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g,' ')
+      .replace(/[()（）\[\]]/g,'')
+      .replace(/점$/,'')
+      .trim();
+  }
+
+  function distM(lat1,lng1,lat2,lng2){
+    const R=6371000, T=Math.PI/180;
+    const dLat=(lat2-lat1)*T, dLng=(lng2-lng1)*T;
+    const a=Math.sin(dLat/2)**2 + Math.cos(lat1*T)*Math.cos(lat2*T)*Math.sin(dLng/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+
+  function fmtKmFromM(m){
+    if(m == null || !isFinite(m)) return '';
+    return (m/1000).toFixed(2) + 'km';
+  }
+
+  // =========================
+  // Split4 helpers (키워드 검색 cap 대응)
+  // =========================
+  function metersToLatDeg(m){ return (m / 6371000) * (180 / Math.PI); }
+  function metersToLngDeg(m, atLat){
+    return metersToLatDeg(m) / Math.cos(atLat * Math.PI/180);
+  }
+
+  function split4Centers(lat, lng, R){
+    const dLat = metersToLatDeg(R/2);
+    const dLng = metersToLngDeg(R/2, lat);
+    const subR = R / Math.SQRT2;
+
+    return {
+      subRadius: subR,
+      centers: [
+        { lat: lat + dLat, lng: lng + dLng }, // NE
+        { lat: lat + dLat, lng: lng - dLng }, // NW
+        { lat: lat - dLat, lng: lng + dLng }, // SE
+        { lat: lat - dLat, lng: lng - dLng }  // SW
+      ]
+    };
+  }
+
+  // =========================
+  // Kakao SDK load
+  // =========================
+  $('loadSdk').addEventListener('click', function(){
+    const key = $('kakaoKey').value.trim();
+    if(!key){ alert('Enter Kakao JavaScript key.'); return; }
+    if(sdkReady){ alert('SDK already loaded.'); return; }
+
+    const s = document.createElement('script');
+    s.src = 'https://dapi.kakao.com/v2/maps/sdk.js?appkey=' + encodeURIComponent(key) + '&autoload=false&libraries=services';
+    s.onload = function(){
+      kakao.maps.load(function(){
+        initMap();
+        sdkReady = true;
+        log('SDK loaded (with services).');
+      });
+    };
+    s.onerror = function(){ alert('SDK load failed. Check key & domain.'); };
+    document.head.appendChild(s);
+  });
+
+  function initMap(){
+    const center = new kakao.maps.LatLng(37.5665, 126.9780);
+    map = new kakao.maps.Map($('map'), { center, level: 6 });
+    places = new kakao.maps.services.Places();
+    log('Map initialized.');
+  }
+
+  // =========================
+  // Clear / Draw helpers
+  // =========================
+  function clearMap(){
+    areaMarkers.forEach(m => m.setMap(null));
+    compMarkers.forEach(m => m.setMap(null));
+    areaMarkers = [];
+    compMarkers = [];
+    if(radiusCircle){ radiusCircle.setMap(null); radiusCircle = null; }
+
+    $('selInfo').textContent = '-';
+    $('kwInfo').textContent = '-';
+    $('nearShabuInfo').textContent = '-';
+
+    tableRows = [];
+    renderTable([]);
+
+    log('Cleared overlays.');
+  }
+  $('clear').addEventListener('click', clearMap);
+
+  function makeDotMarker(lat, lng, colorHex, title){
+    const content =
+      '<div style="width:12px;height:12px;border-radius:999px;background:'+colorHex+
+      ';border:2px solid #00000033;box-shadow:0 1px 2px #00000022" title="'+(title||'').replace(/"/g,'&quot;')+'"></div>';
+    const overlay = new kakao.maps.CustomOverlay({
+      position: new kakao.maps.LatLng(lat,lng),
+      content,
+      yAnchor: 0.5, xAnchor: 0.5
+    });
+    overlay.setMap(map);
+    return overlay;
+  }
+
+  function drawRadiusCircle(lat, lng, rMeters){
+    if(radiusCircle){ radiusCircle.setMap(null); radiusCircle = null; }
+    const pos = new kakao.maps.LatLng(lat,lng);
+    radiusCircle = new kakao.maps.Circle({
+      center: pos,
+      radius: rMeters,
+      strokeWeight: 2,
+      strokeColor: COLOR_AREA,
+      strokeOpacity: 1,
+      strokeStyle: 'solid',
+      fillColor: COLOR_AREA,
+      fillOpacity: 0
+    });
+    radiusCircle.setMap(map);
+  }
+
+  function fitBoundsForPoints(points){
+    if(!points || !points.length) return;
+    const bounds = new kakao.maps.LatLngBounds();
+    points.forEach(p => bounds.extend(new kakao.maps.LatLng(p.lat, p.lng)));
+    map.setBounds(bounds, 24, 24, 24, 24);
+  }
+
+  function flyTo(lat, lng, level){
+    if(!map) return;
+    const pos = new kakao.maps.LatLng(lat, lng);
+    map.panTo(pos);
+    if(level != null) map.setLevel(level);
+  }
+
+  function drawCompetitorMarkers(nearest){
+    // nearest = {shabu:{p,dist}, ...}
+    compMarkers.forEach(m => m.setMap(null));
+    compMarkers = [];
+
+    if(nearest.shabu && nearest.shabu.p){
+      compMarkers.push(makeDotMarker(nearest.shabu.p.lat, nearest.shabu.p.lng, COLOR_SHABU, `샤브올데이 · ${nearest.shabu.p.name}`));
+    }
+    if(nearest.kookoo && nearest.kookoo.p){
+      compMarkers.push(makeDotMarker(nearest.kookoo.p.lat, nearest.kookoo.p.lng, COLOR_KOOKOO, `쿠우쿠우 · ${nearest.kookoo.p.name}`));
+    }
+    if(nearest.ashley && nearest.ashley.p){
+      compMarkers.push(makeDotMarker(nearest.ashley.p.lat, nearest.ashley.p.lng, COLOR_ASHLEY, `애슐리 · ${nearest.ashley.p.name}`));
+    }
+    if(nearest.myeong && nearest.myeong.p){
+      compMarkers.push(makeDotMarker(nearest.myeong.p.lat, nearest.myeong.p.lng, COLOR_MYEONG, `명륜진사갈비 · ${nearest.myeong.p.name}`));
+    }
+  }
+
+  // =========================
+  // Excel parsing
+  // =========================
+  function readWorkbook(file){
+    return file.arrayBuffer().then(ab => XLSX.read(ab,{type:'array'}));
+  }
+  function sheetToRows(wb, name){
+    const ws = wb.Sheets[name];
+    return ws ? XLSX.utils.sheet_to_json(ws,{defval:''}) : null;
+  }
+
+  function validatePointHeaders(rows){
+    if(!rows || !rows.length) return false;
+    const need = ['Latitude','Longitude'];
+    for(const k of need){ if(!(k in rows[0])) return false; }
+    // Name은 Areas에서 다를 수 있어서 유연하게
+    return true;
+  }
+
+  function rowsToPoints(rows, nameFieldCandidates){
+    const first = rows && rows[0] ? rows[0] : {};
+    let nameKey = null;
+    for(const c of (nameFieldCandidates || [])){
+      if(c in first){ nameKey = c; break; }
+    }
+    if(!nameKey){
+      // fallback: Name / Area / 첫 컬럼
+      nameKey = ('Name' in first) ? 'Name'
+              : ('Area' in first) ? 'Area'
+              : ('지역' in first) ? '지역'
+              : ('행정동' in first) ? '행정동'
+              : Object.keys(first)[0];
+    }
+
+    const addrKey = ('Address' in first) ? 'Address'
+                 : ('주소' in first) ? '주소'
+                 : null;
+
+    return rows.map(r => ({
+      name: String(r[nameKey] ?? '').trim(),
+      address: addrKey ? String(r[addrKey] ?? '').trim() : '',
+      lat: toNum(r.Latitude),
+      lng: toNum(r.Longitude)
+    })).filter(p => isFinite(p.lat) && isFinite(p.lng));
+  }
+
+  function parseShabuPSR(rows){
+    // A열: 지점명 / E~O: 1~11월PSR (1행 헤더)
+    const map = new Map();
+    if(!rows || !rows.length) return map;
+
+    const first = rows[0];
+    const nameKey =
+      ('Name' in first) ? 'Name' :
+      ('매장명' in first) ? '매장명' :
+      ('지점명' in first) ? '지점명' :
+      Object.keys(first)[0];
+
+    for(const r of rows){
+      const nmRaw = String(r[nameKey] ?? '').trim();
+      if(!nmRaw) continue;
+      const k = normalizeName(nmRaw);
+
+      const months = {};
+      for(const mh of PSR_MONTH_HEADERS){
+        const v = r[mh.hdr];
+        const n = toNum(v);
+        months[mh.key] = isFinite(n) ? n : '';
+      }
+      map.set(k, { storeName: nmRaw, months });
+    }
+    return map;
+  }
+
+  // =========================
+  // Nearest point
+  // =========================
+  function nearestPoint(center, arr){
+    let best = null;
+    let bestD = Infinity;
+    for(const p of arr){
+      const d = distM(center.lat, center.lng, p.lat, p.lng);
+      if(d < bestD){
+        bestD = d;
+        best = p;
+      }
+    }
+    if(!best) return { p:null, distM:null };
+    return { p: best, distM: bestD };
+  }
+
+  // =========================
+  // Kakao Places: keyword OR + split4 (cap 대응)
+  // =========================
+  async function keywordSearchItemsWithinRadius(lat, lng, rMeters, keyword){
+    if(!places) return { items: [], failed: true, capped: false, note: 'Places not ready' };
+
+    const key = `KWITEMS|${lat.toFixed(6)}|${lng.toFixed(6)}|${rMeters}|${keyword}`;
+    if(keywordCache.has(key)) return keywordCache.get(key);
+
+    const opts = {
+      location: new kakao.maps.LatLng(lat, lng),
+      radius: rMeters,
+      sort: kakao.maps.services.SortBy.DISTANCE
+    };
+
+    const maxRetries = 3;
+    const baseDelayMs = 350;
+    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+    for(let attempt=0; attempt<=maxRetries; attempt++){
+      const result = await new Promise((resolve) => {
+        const items = [];
+        let pages = 0;
+
+        function handlePage(data, status, pagination){
+          if(status === kakao.maps.services.Status.OK){
+            pages += 1;
+            for(const d of (data || [])){
+              if(!d || !d.id) continue;
+              items.push({
+                id: String(d.id),
+                lat: parseFloat(d.y),
+                lng: parseFloat(d.x),
+                name: String(d.place_name || '')
+              });
+            }
+            if(pagination && pagination.hasNextPage){
+              setTimeout(() => pagination.nextPage(), 80);
+              return;
+            }
+            const capped = (items.length >= 45);
+            const out = { items, failed:false, capped, note:`pages=${pages}` };
+            keywordCache.set(key, out);
+            resolve({ ok:true, out });
+            return;
+          }
+          if(status === kakao.maps.services.Status.ZERO_RESULT){
+            const out = { items: [], failed:false, capped:false, note:'ZERO_RESULT' };
+            keywordCache.set(key, out);
+            resolve({ ok:true, out });
+            return;
+          }
+          resolve({ ok:false, status:String(status) });
+        }
+
+        places.keywordSearch(keyword, handlePage, opts);
+      });
+
+      if(result.ok) return result.out;
+      await sleep(baseDelayMs * Math.pow(2, attempt));
+    }
+
+    return { items: [], failed:true, capped:false, note:'FAILED_AFTER_RETRIES' };
+  }
+
+  async function keywordCountWithinRadius_OR_Split4(lat, lng, R, keywords){
+    let baseItemsAll = [];
+    let baseCappedAny = false;
+
+    for(const kw of keywords){
+      const r = await keywordSearchItemsWithinRadius(lat, lng, R, kw);
+      if(r.capped) baseCappedAny = true;
+      baseItemsAll.push(...r.items);
+    }
+
+    const baseMap = new Map();
+    for(const it of baseItemsAll) baseMap.set(it.id, it);
+
+    if(!baseCappedAny){
+      let cnt = 0;
+      for(const it of baseMap.values()){
+        if(distM(lat, lng, it.lat, it.lng) <= R) cnt++;
+      }
+      return { count: cnt, mode: 'single' };
+    }
+
+    // split4
+    const { centers, subRadius } = split4Centers(lat, lng, R);
+    const all = [];
+    for(const c of centers){
+      for(const kw of keywords){
+        const r = await keywordSearchItemsWithinRadius(c.lat, c.lng, subRadius, kw);
+        all.push(...r.items);
+      }
+    }
+
+    const idMap = new Map();
+    for(const it of all) idMap.set(it.id, it);
+
+    let cnt = 0;
+    for(const it of idMap.values()){
+      if(distM(lat, lng, it.lat, it.lng) <= R) cnt++;
+    }
+    return { count: cnt, mode: 'split4' };
+  }
+
+  // =========================
+  // Build one result row (AREA 기준)
+  // =========================
+  async function buildResultRowForArea(areaPoint, rMeters){
+    const nearShabu  = nearestPoint(areaPoint, datasets.shabu);
+    const nearAshley = nearestPoint(areaPoint, datasets.ashley);
+    const nearKookoo = nearestPoint(areaPoint, datasets.kookoo);
+    const nearMyeong = nearestPoint(areaPoint, datasets.myeong);
+
+    const kw = await keywordCountWithinRadius_OR_Split4(areaPoint.lat, areaPoint.lng, rMeters, KEYWORDS_INRADIUS);
+
+    // nearest shabu PSR months
+    let psr = null;
+    if(nearShabu.p){
+      psr = shabuPsrMap.get(normalizeName(nearShabu.p.name)) || null;
+    }
+
+    const row = {
+      _lat: areaPoint.lat,
+      _lng: areaPoint.lng,
+
+      Area_Name: areaPoint.name || '',
+      Area_Address: areaPoint.address || '',
+      Area_Latitude: areaPoint.lat,
+      Area_Longitude: areaPoint.lng,
+      Radius_m: rMeters,
+
+      Nearest_Shabu_Name: nearShabu.p ? (nearShabu.p.name || '') : '',
+      Nearest_Shabu_Dist_km: nearShabu.distM == null ? '' : fmtKmFromM(nearShabu.distM),
+      Nearest_Ashley_Name: nearAshley.p ? (nearAshley.p.name || '') : '',
+      Nearest_Ashley_Dist_km: nearAshley.distM == null ? '' : fmtKmFromM(nearAshley.distM),
+      Nearest_Kookoo_Name: nearKookoo.p ? (nearKookoo.p.name || '') : '',
+      Nearest_Kookoo_Dist_km: nearKookoo.distM == null ? '' : fmtKmFromM(nearKookoo.distM),
+      Nearest_Myeong_Name: nearMyeong.p ? (nearMyeong.p.name || '') : '',
+      Nearest_Myeong_Dist_km: nearMyeong.distM == null ? '' : fmtKmFromM(nearMyeong.distM),
+
+      Keyword_cnt: (kw.count == null ? '' : kw.count),
+      Keyword_mode: kw.mode
+    };
+
+    // attach PSR columns 1~11월
+    for(const mh of PSR_MONTH_HEADERS){
+      const v = psr && psr.months ? psr.months[mh.key] : '';
+      row[mh.label] = (v == null ? '' : v);
+    }
+
+    // also store raw nearest coords for marker drawing
+    row._near = {
+      shabu: nearShabu,
+      ashley: nearAshley,
+      kookoo: nearKookoo,
+      myeong: nearMyeong
+    };
+
+    return row;
+  }
+
+  // =========================
+  // Table render
+  // =========================
+  function buildHeader(){
+    const head = $('resultsHead');
+
+    const psrCols = PSR_MONTH_HEADERS.map(m => `<th>${escapeHtml(m.label)}</th>`).join('');
+
+    head.innerHTML = `
+      <th>#</th>
+      <th>Area_Name</th>
+      <th>Area_Address</th>
+      <th>Area_Lat</th>
+      <th>Area_Lng</th>
+      <th>Radius_m</th>
+
+      <th>Shabu_nearest_name</th>
+      <th>Shabu_nearest_dist</th>
+
+      <th>Ashley_nearest_name</th>
+      <th>Ashley_nearest_dist</th>
+
+      <th>Kookoo_nearest_name</th>
+      <th>Kookoo_nearest_dist</th>
+
+      <th>Myeong_nearest_name</th>
+      <th>Myeong_nearest_dist</th>
+
+      <th>Keyword_cnt</th>
+      <th>Keyword_mode</th>
+
+      ${psrCols}
+    `;
+  }
+
+  function renderTable(rows){
+    buildHeader();
+
+    const body = $('resultsBody');
+    $('statRows').textContent = `Rows: ${rows.length}`;
+
+    const colCount = 16 + PSR_MONTH_HEADERS.length;
+
+    if(!rows.length){
+      body.innerHTML = `<tr><td colspan="${colCount}" class="muted">-</td></tr>`;
+      return;
+    }
+
+    body.innerHTML = rows.map((r, i) => {
+      const psrTds = PSR_MONTH_HEADERS.map(m => {
+        const v = r[m.label];
+        return `<td>${(v === '' || v == null) ? '' : v}</td>`;
+      }).join('');
+
+      return `
+        <tr data-lat="${r._lat}" data-lng="${r._lng}" data-idx="${i}">
+          <td>${i+1}</td>
+          <td>${escapeHtml(r.Area_Name)}</td>
+          <td>${escapeHtml(r.Area_Address)}</td>
+          <td>${r.Area_Latitude}</td>
+          <td>${r.Area_Longitude}</td>
+          <td>${r.Radius_m}</td>
+
+          <td>${escapeHtml(r.Nearest_Shabu_Name)}</td>
+          <td>${escapeHtml(r.Nearest_Shabu_Dist_km)}</td>
+
+          <td>${escapeHtml(r.Nearest_Ashley_Name)}</td>
+          <td>${escapeHtml(r.Nearest_Ashley_Dist_km)}</td>
+
+          <td>${escapeHtml(r.Nearest_Kookoo_Name)}</td>
+          <td>${escapeHtml(r.Nearest_Kookoo_Dist_km)}</td>
+
+          <td>${escapeHtml(r.Nearest_Myeong_Name)}</td>
+          <td>${escapeHtml(r.Nearest_Myeong_Dist_km)}</td>
+
+          <td>${r.Keyword_cnt}</td>
+          <td>${escapeHtml(r.Keyword_mode)}</td>
+
+          ${psrTds}
+        </tr>
+      `;
+    }).join('');
+  }
+
+  $('resultsBody').addEventListener('click', function(e){
+    const tr = e.target.closest('tr[data-idx]');
+    if(!tr) return;
+    const lat = parseFloat(tr.dataset.lat);
+    const lng = parseFloat(tr.dataset.lng);
+    if(isFinite(lat) && isFinite(lng)) flyTo(lat, lng, 4);
+
+    // 클릭 시 최근접 지점 마커들 표시(옵션)
+    const idx = parseInt(tr.dataset.idx, 10);
+    const r = tableRows[idx];
+    if(r && r._near){
+      drawCompetitorMarkers(r._near);
+    }
+  });
+
+  // =========================
+  // Draw all Areas
+  // =========================
+  $('drawAll').addEventListener('click', function(){
+    if(!sdkReady || !wbLoaded){ alert('SDK & 엑셀 업로드가 필요합니다.'); return; }
+    clearMap();
+
+    datasets.areas.forEach(p => {
+      const m = makeDotMarker(p.lat, p.lng, COLOR_AREA, `Area · ${p.name || ''}`);
+      areaMarkers.push(m);
+    });
+    fitBoundsForPoints(datasets.areas);
+    log('Drawn: Areas dots.');
+  });
+
+  // =========================
+  // Analyze Selected Area
+  // =========================
+  async function analyzeSelectedArea(){
+    if(!sdkReady || !wbLoaded){ alert('SDK & 엑셀 업로드가 필요합니다.'); return; }
+
+    const idx = $('areaSel').value;
+    if(idx === ''){ alert('Area를 선택하세요.'); return; }
+
+    const radius = parseInt($('radius').value,10) || 500;
+    $('statRadius').textContent = `Radius: ${radius}m`;
+
+    const p = datasets.areas[parseInt(idx,10)];
+    if(!p){ alert('선택 Area가 유효하지 않습니다.'); return; }
+
+    clearMap();
+
+    // draw areas dots
+    datasets.areas.forEach(a => areaMarkers.push(makeDotMarker(a.lat, a.lng, COLOR_AREA, `Area · ${a.name || ''}`)));
+
+    // circle on selected area
+    drawRadiusCircle(p.lat, p.lng, radius);
+    map.panTo(new kakao.maps.LatLng(p.lat, p.lng));
+    map.setLevel(4);
+
+    $('selInfo').textContent = `${p.name || '(무제)'} ${p.address ? '— ' + p.address : ''}`;
+    $('kwInfo').textContent = '검색 중...';
+    $('nearShabuInfo').textContent = '최근접 계산 중...';
+
+    const row = await buildResultRowForArea(p, radius);
+
+    $('kwInfo').textContent = `키워드 "${KEYWORDS_INRADIUS.join(' OR ')}" — ${row.Keyword_cnt === '' ? 'N/A' : row.Keyword_cnt}건 (mode=${row.Keyword_mode})`;
+    $('nearShabuInfo').textContent = row.Nearest_Shabu_Name
+      ? `${row.Nearest_Shabu_Name} / ${row.Nearest_Shabu_Dist_km}`
+      : '(최근접 샤브올데이 없음)';
+
+    // mark nearest stores
+    drawCompetitorMarkers(row._near);
+
+    tableRows = [row];
+    renderTable(tableRows);
+
+    log(`Analyze Selected Area done. radius=${radius}m`);
+    return row;
+  }
+  $('analyzeSelected').addEventListener('click', analyzeSelectedArea);
+
+  // =========================
+  // Analyze All Areas
+  // =========================
+  async function analyzeAllAreas(){
+    if(!sdkReady || !wbLoaded){ alert('SDK & 엑셀 업로드가 필요합니다.'); return; }
+
+    const radius = parseInt($('radius').value,10) || 500;
+    $('statRadius').textContent = `Radius: ${radius}m`;
+
+    clearMap();
+
+    // draw areas dots
+    datasets.areas.forEach(a => areaMarkers.push(makeDotMarker(a.lat, a.lng, COLOR_AREA, `Area · ${a.name || ''}`)));
+    fitBoundsForPoints(datasets.areas);
+
+    $('selInfo').textContent = `전체 Areas (${datasets.areas.length}개)`;
+    $('kwInfo').textContent = '전체 키워드 검색 중...';
+    $('nearShabuInfo').textContent = '전체 최근접 계산 중...';
+
+    const out = [];
+    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+    log(`Analyze All Areas start: n=${datasets.areas.length}, radius=${radius}m`);
+
+    for(let i=0;i<datasets.areas.length;i++){
+      const p = datasets.areas[i];
+      const row = await buildResultRowForArea(p, radius);
+      out.push(row);
+
+      if((i+1) % 10 === 0 || i === datasets.areas.length - 1){
+        tableRows = out.slice();
+        renderTable(tableRows);
+        log(`...processed ${i+1}/${datasets.areas.length}`);
+      }
+
+      // Kakao rate limit 완화용 (필요시 조절)
+      await sleep(350);
+    }
+
+    tableRows = out;
+    renderTable(tableRows);
+
+    $('kwInfo').textContent = `키워드 "${KEYWORDS_INRADIUS.join(' OR ')}" — 완료`;
+    $('nearShabuInfo').textContent = `완료 (radius=${radius}m)`;
+
+    log(`Analyze All Areas done. rows=${out.length}`);
+    return out;
+  }
+  $('analyzeAll').addEventListener('click', analyzeAllAreas);
+
+  // radius change: selected만 자동 재분석
+  $('radius').addEventListener('input', debounce(() => {
+    const radius = parseInt($('radius').value,10) || 500;
+    $('statRadius').textContent = `Radius: ${radius}m`;
+    if(sdkReady && wbLoaded && $('areaSel').value !== ''){
+      analyzeSelectedArea();
+    }
+  }, 250));
+
+  $('areaSel').addEventListener('change', debounce(() => {
+    if(sdkReady && wbLoaded && $('areaSel').value !== ''){
+      analyzeSelectedArea();
+    }
+  }, 150));
+
+  // =========================
+  // CSV (Table) export
+  // =========================
+  function toCSV(rows){
+    const baseHeader = [
+      'Area_Name','Area_Address','Area_Latitude','Area_Longitude','Radius_m',
+      'Nearest_Shabu_Name','Nearest_Shabu_Dist_km',
+      'Nearest_Ashley_Name','Nearest_Ashley_Dist_km',
+      'Nearest_Kookoo_Name','Nearest_Kookoo_Dist_km',
+      'Nearest_Myeong_Name','Nearest_Myeong_Dist_km',
+      'Keyword_cnt','Keyword_mode'
+    ];
+    const psrHeader = PSR_MONTH_HEADERS.map(m => m.label);
+    const header = baseHeader.concat(psrHeader);
+
+    const esc = (v) => {
+      let s = String(v ?? '');
+      s = s.replace(/\r?\n/g,' ');
+      if(/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+      return s;
+    };
+
+    const lines = [];
+    lines.push(header.join(','));
+    for(const r of rows){
+      const line = header.map(k => esc(r[k])).join(',');
+      lines.push(line);
+    }
+    return lines.join('\n');
+  }
+
+  function downloadText(filename, text){
+    const bom = '\uFEFF';
+    const normalized = String(text).replace(/\n/g, '\r\n');
+    const blob = new Blob([bom + normalized], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  $('csvTable').addEventListener('click', () => {
+    if(!tableRows || tableRows.length === 0){
+      alert('테이블에 데이터가 없습니다. 먼저 Analyze를 실행하세요.');
+      return;
+    }
+    const radius = parseInt($('radius').value,10) || 500;
+    const csv = toCSV(tableRows);
+    downloadText(`areas_nearest_psr_radius_${radius}m.csv`, csv);
+    log(`CSV(Table) downloaded. rows=${tableRows.length}`);
+  });
+
+  // =========================
+  // debounce
+  // =========================
+  function debounce(fn, ms){
+    let t;
+    return function(){
+      const args = arguments;
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(null,args), ms);
+    };
+  }
+
+  // =========================
+  // Excel upload (Areas + brands + PSR)
+  // =========================
+  $('xlsx').addEventListener('change', async function(){
+    const file = $('xlsx').files && $('xlsx').files[0];
+    if(!file) return;
+    if(!sdkReady){
+      alert('먼저 Kakao SDK를 로드하세요.');
+      $('xlsx').value = '';
+      return;
+    }
+
+    try{
+      const wb = await readWorkbook(file);
+      const sheetNames = wb.SheetNames || [];
+
+      // try find by name
+      const pick = (want) => sheetNames.find(n => String(n).trim() === want);
+
+      const sAreas  = pick('Areas') || sheetNames[0];
+      const sShabu  = pick('샤브올데이') || sheetNames[1];
+      const sKookoo = pick('쿠우쿠우') || sheetNames[2];
+      const sAshley = pick('애슐리') || sheetNames[3];
+      const sMyeong = pick('명륜진사갈비') || sheetNames[4];
+      const sPSR    = pick('샤브올데이PSR') || sheetNames.find(n => String(n).includes('PSR'));
+
+      const rAreas  = sheetToRows(wb, sAreas);
+      const rShabu  = sheetToRows(wb, sShabu);
+      const rKookoo = sheetToRows(wb, sKookoo);
+      const rAshley = sheetToRows(wb, sAshley);
+      const rMyeong = sheetToRows(wb, sMyeong);
+      const rPSR    = sPSR ? sheetToRows(wb, sPSR) : null;
+
+      if(!validatePointHeaders(rAreas)){
+        alert('Areas 시트에 Latitude/Longitude 컬럼이 필요합니다.');
+        return;
+      }
+      if(!validatePointHeaders(rShabu) || !validatePointHeaders(rKookoo) || !validatePointHeaders(rAshley) || !validatePointHeaders(rMyeong)){
+        alert('브랜드 시트들에 Latitude/Longitude 컬럼이 필요합니다.');
+        return;
+      }
+
+      datasets.areas  = rowsToPoints(rAreas, ['Area','Name','지역','행정동']);
+      datasets.shabu  = rowsToPoints(rShabu, ['Name','매장명','지점명']);
+      datasets.kookoo = rowsToPoints(rKookoo, ['Name','매장명','지점명']);
+      datasets.ashley = rowsToPoints(rAshley, ['Name','매장명','지점명']);
+      datasets.myeong = rowsToPoints(rMyeong, ['Name','매장명','지점명']);
+
+      shabuPsrMap = rPSR ? parseShabuPSR(rPSR) : new Map();
+
+      wbLoaded = true;
+
+      const sheetsLabel = [
+        `Areas:${sAreas}`,
+        `Shabu:${sShabu}`,
+        `Kookoo:${sKookoo}`,
+        `Ashley:${sAshley}`,
+        `Myeong:${sMyeong}`,
+        `PSR:${sPSR || '(없음)'}`
+      ].join(' / ');
+
+      $('statSheets').textContent = `Sheets: ${sheetsLabel}`;
+      $('statAreas').textContent  = `Areas: ${datasets.areas.length}`;
+      $('statRows').textContent   = `Rows: 0`;
+
+      // selector
+      const sel = $('areaSel');
+      sel.innerHTML = '<option value="">— 선택 —</option>';
+      datasets.areas.forEach((p, idx) => {
+        const o = document.createElement('option');
+        o.value = String(idx);
+        o.textContent = `${p.name || '(무제)'}${p.address ? ' — ' + p.address : ''}`;
+        sel.appendChild(o);
+      });
+      sel.disabled = false;
+
+      $('drawAll').disabled = false;
+      $('analyzeSelected').disabled = false;
+      $('analyzeAll').disabled = false;
+      $('csvTable').disabled = false;
+
+      clearMap();
+      log(`Workbook loaded. Areas=${datasets.areas.length}, Shabu=${datasets.shabu.length}, Kookoo=${datasets.kookoo.length}, Ashley=${datasets.ashley.length}, Myeong=${datasets.myeong.length}, PSRmap=${shabuPsrMap.size}`);
+    }catch(e){
+      console.error(e);
+      alert('Read error: ' + (e && e.message ? e.message : e));
+    }
+  });
+
+  </script>
+</body>
+</html>
